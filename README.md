@@ -3,6 +3,16 @@
 shadow4android
 ==============
 
+## 修改内容
+
+- 重构部分内容的命名，和函数结构
+- 修改部分资源表现形式
+- 主语言中文翻译
+
+[Forked From](https://github.com/inloop/shadow4android)
+
+---
+
 *Android 9-patch shadow generator*
 
 #### Examples
