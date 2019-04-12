@@ -1,14 +1,23 @@
 var canvas = document.getElementById("shadow_image");
 var ctx = canvas.getContext("2d");
 
-var BOX_RESIZE_TYPE = {None:0, Right:1, Bottom:2, Corner:3};
+var BOX_RESIZE_TYPE = {None: 0, Right: 1, Bottom: 2, Corner: 3};
 
-var boundPos = {leftPos: -1, topPos: -1, rightPos: -1, bottomPos: -1};
+var boundPos = {
+    leftPos: -1, topPos: -1, rightPos: -1, bottomPos: -1, canvasWidth: -1, canvasHeight: -1,
+    clipLeft: -1
+};
+var clipSide = {left: false, top: false, right: false, bottom: false};
 var shadowColor, fillColor, outlineColor, shadowBlur, shadowOffsetX, shadowOffsetY,
     outlineWidth, isTransparentFill, roundRadius, hideNinepatches,
     showContentArea;
 var objectWidth = 200, objectHeight = 200;
 var boxResizeMode = 0, boxResizeData = null, BOX_ANCHOR = 6;
+
+var paddingLeft = 0;
+var paddingRight = 0;
+var paddingTop = 0;
+var paddingBottom = 0;
 
 var CANVAS_MIN_WIDTH = 10, CANVAS_MIN_HEIGHT = 10;
 var CANVAS_MAX_WIDTH = 500, CANVAS_MAX_HEIGHT = 500;
@@ -47,9 +56,9 @@ function setShadow(x, y, b, c) {
 function exportAsPng() {
     var date = new Date();
     bootbox.prompt({
-        title: "Enter output filename (without '.9.png')",
+        title: "保存名字 (不包含 '.9.png')",
         value: "shadow_" + date.getHours() + "" + date.getMinutes() + "" + date.getSeconds(),
-        callback: function(result) {
+        callback: function (result) {
             if (result !== null && result !== "") {
                 //Show ninepatches If hidden when exporting
                 var hideNinepatchesTmp = false;
@@ -83,27 +92,38 @@ function exportAsPng() {
     });
 }
 
-function drawShadow(w, h, radius, fast) {
+function predraw(w, h, radius) {
     canvas.width = CANVAS_MAX_WIDTH;
     canvas.height = CANVAS_MAX_HEIGHT;
 
+    var transparentTmp = isTransparentFill;
+    isTransparentFill = false;
+    drawShadowInternal(w, h, radius, true);
+
+    updateBounds(w, h);
+
+    isTransparentFill = transparentTmp;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawShadow(w, h, radius, fast) {
     var paddingValues = getPaddingValues();
 
     //First time draw with filled background
     //for calculating final size of ninepatch
-    var transparentTmp = isTransparentFill;
-    isTransparentFill = false;
-    drawShadowInternal(w, h, radius, true);
     if (!fast) {
-        updateBounds();
+        predraw(w, h, radius);
     }
-    isTransparentFill = transparentTmp;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    canvas.width = Math.round(canvas.width - (boundPos.leftPos + boundPos.rightPos));
-    canvas.height = Math.round(canvas.height - (boundPos.topPos + boundPos.bottomPos));
-    drawNinepatchLines(w, h, paddingValues);
+    //Set canvas size to calculated size
+    canvas.width = boundPos.canvasWidth;
+    canvas.height = boundPos.canvasHeight;
+
+
     drawShadowInternal(w, h, radius, false, true);
+
+    drawNinepatchLines(w, h, paddingValues);
+
 
     if (showContentArea) {
         drawContentArea(w, h, paddingValues);
@@ -155,7 +175,7 @@ function drawShadowInternal(w, h, radius, center, translate) {
     ctx.fill();
 
     if (!isTransparentFill && outlineWidth > 0) {
-        setShadow(0,0,0,0);
+        setShadow(0, 0, 0, 0);
         ctx.strokeStyle = outlineColor;
         ctx.lineWidth = outlineWidth;
         ctx.stroke();
@@ -192,7 +212,7 @@ function getRelativeY() {
     return Math.round((CANVAS_MAX_HEIGHT / 2) - (objectHeight / 2) - boundPos.topPos);
 }
 
-function updateBounds() {
+function updateBounds(w, h) {
     boundPos.leftPos = boundPos.topPos = Number.MAX_VALUE;
     boundPos.rightPos = boundPos.bottomPos = -1;
 
@@ -203,8 +223,8 @@ function updateBounds() {
 
     //Iterate through all pixels in image
     //used to get image bounds (where shadow ends)
-    for(var i=0; i<imageData.length; i+=4) {
-        if (imageData[i+3] != 0) { //check for non alpha pixel
+    for (var i = 0; i < imageData.length; i += 4) {
+        if (imageData[i + 3] != 0) { //check for non alpha pixel
             var x = (i / 4) % imageWidth;
             var y = Math.floor((i / 4) / imageWidth);
 
@@ -222,10 +242,56 @@ function updateBounds() {
         }
     }
 
+    var actualWidth = boundPos.rightPos - boundPos.leftPos;
+    var actualHeight = boundPos.bottomPos - boundPos.topPos;
+    var actualPaddingTop = imageHeight / 2 - h / 2 - boundPos.topPos;
+    var actualPaddingBottom = boundPos.bottomPos - (imageHeight / 2 + h / 2);
+    var actualPaddingLeft = imageWidth / 2 - w / 2 - boundPos.leftPos;
+    var actualPaddingRight = boundPos.rightPos - (imageWidth / 2 + w / 2);
+
+    var msg = ['actual size: [', actualWidth, actualHeight, ']',
+        ' shadow [', actualPaddingTop, actualPaddingRight, actualPaddingBottom, actualPaddingLeft, ']'].join(' ');
+    //show the actual size
+    $('#actual-padding').html(msg);
+
+    //change to desire bounds
+    if (paddingLeft != 0) {
+        boundPos.leftPos = (imageWidth - w) / 2 - paddingLeft;
+    }
+    if (paddingRight != 0) {
+        boundPos.rightPos = imageWidth / 2 + w / 2 + paddingLeft;
+    }
+    if (paddingTop != 0) {
+        boundPos.topPos = (imageHeight - h) / 2 - paddingTop;
+    }
+    if (paddingBottom != 0) {
+        boundPos.bottomPos = imageHeight / 2 + h / 2 + paddingBottom;
+    }
+
     boundPos.leftPos = boundPos.leftPos - 1;
     boundPos.topPos = boundPos.topPos - 1;
     boundPos.rightPos = imageWidth - boundPos.rightPos - 2;
     boundPos.bottomPos = imageHeight - boundPos.bottomPos - 2;
+
+    //Calculate final canvas width and height
+    boundPos.canvasWidth = Math.round(canvas.width - (boundPos.leftPos + boundPos.rightPos));
+    boundPos.canvasHeight = Math.round(canvas.height - (boundPos.topPos + boundPos.bottomPos));
+
+    //Add clipping If set
+    var clipLeft = clipSide.left ? getRelativeX() + roundRadius.lowerLeft : 0;
+    var clipTop = clipSide.top ? getRelativeY() + roundRadius.upperLeft : 0;
+    var clipRight = clipSide.right ? boundPos.canvasWidth - objectWidth - getRelativeX() + roundRadius.lowerRight : 0;
+    var clipBottom = clipSide.bottom ? boundPos.canvasHeight - objectHeight - getRelativeY() + roundRadius.upperRight : 0;
+
+    boundPos.leftPos += clipLeft;
+    boundPos.topPos += clipTop;
+    boundPos.rightPos += clipRight;
+    boundPos.bottomPos += clipBottom;
+
+    boundPos.clipLeft = clipLeft;
+
+    boundPos.canvasWidth -= clipLeft + clipRight;
+    boundPos.canvasHeight -= clipBottom + clipTop;
 }
 
 function getPaddingValues() {
@@ -236,8 +302,10 @@ function getPaddingValues() {
     var bottomLeft = (bottomPad[0] / 100);
     var bottomRight = ((100 - bottomPad[1]) / 100);
 
-    return {verticalTop: rightTop, verticalBottom: rightBottom,
-            horizontalLeft: bottomLeft, horizontalRight: bottomRight};
+    return {
+        verticalTop: rightTop, verticalBottom: rightBottom,
+        horizontalLeft: bottomLeft, horizontalRight: bottomRight
+    };
 }
 
 function drawNinepatchLines(w, h, paddingValues) {
@@ -245,12 +313,10 @@ function drawNinepatchLines(w, h, paddingValues) {
         return;
     }
 
-    ctx.strokeStyle = "black";
-    ctx.lineWidth = 2;
-
     var s = 0;
     var offsetX = getRelativeX();
     var offsetY = getRelativeY();
+    var ninepatchLineWidth = 1;
     var width = canvas.width;
     var height = canvas.height;
 
@@ -262,6 +328,21 @@ function drawNinepatchLines(w, h, paddingValues) {
         offsetX += outlineHalf;
         offsetY += outlineHalf;
     }
+
+    //Clear 1px frame around image for ninepatch pixels
+    //Top
+    ctx.clearRect(0, 0, width, ninepatchLineWidth);
+    //Bottom
+    ctx.clearRect(0, height - ninepatchLineWidth, width, ninepatchLineWidth);
+    //Left
+    ctx.clearRect(0, 0, ninepatchLineWidth, height);
+    //Right
+    ctx.clearRect(width - ninepatchLineWidth, 0, ninepatchLineWidth, height);
+
+    ctx.strokeStyle = "black";
+    ctx.lineWidth = ninepatchLineWidth * 2;
+
+    ctx.beginPath();
 
     //Draw left
     s = h / 2;
@@ -275,13 +356,21 @@ function drawNinepatchLines(w, h, paddingValues) {
 
     //Draw right
     ctx.moveTo(Math.round(width), Math.round(offsetY + (h * paddingValues.verticalTop)));
-    ctx.lineTo(Math.round(width), Math.round(offsetY + h - (h * paddingValues.verticalBottom)));
+    ctx.lineTo(Math.round(width), Math.round(offsetY + h - (h * paddingValues.verticalBottom - ninepatchLineWidth)));
 
     //Draw bottom
     ctx.moveTo(Math.round(offsetX + (w * paddingValues.horizontalLeft)), Math.round(height));
     ctx.lineTo(Math.round(offsetX + w - (w * paddingValues.horizontalRight)), Math.round(height));
 
+    ctx.closePath();
     ctx.stroke();
+
+    //Clear right top corner
+    ctx.clearRect(width - ninepatchLineWidth, 0, ninepatchLineWidth, ninepatchLineWidth);
+    //Clear right bottom corner
+    ctx.clearRect(width - ninepatchLineWidth, height - ninepatchLineWidth, ninepatchLineWidth, ninepatchLineWidth);
+    //Clear left bottom corner
+    ctx.clearRect(0, height - ninepatchLineWidth, ninepatchLineWidth, ninepatchLineWidth);
 }
 
 function redraw(fast) {
@@ -312,6 +401,11 @@ function redraw(fast) {
         lowerRight: parseFloatAndClamp($("#shadow-round-br").val(), minRadius, maxRadius)
     };
 
+    paddingTop = parseFloatAndClamp($('#padding-top-line').val(), 0, CANVAS_MAX_WIDTH, 0);
+    paddingBottom = parseFloatAndClamp($('#padding-bottom-line').val(), 0, CANVAS_MAX_WIDTH, 0);
+    paddingLeft = parseFloatAndClamp($('#padding-left-line').val(), 0, CANVAS_MAX_WIDTH, 0);
+    paddingRight = parseFloatAndClamp($('#padding-right-line').val(), 0, CANVAS_MAX_WIDTH, 0);
+
     drawShadow(objectWidth, objectHeight, roundRadius, fast);
 }
 
@@ -335,7 +429,7 @@ function setRoundSimple(val) {
 
 $(document).ready(function () {
     $("#shadow-blur, #shadow-offset-x, #shadow-offset-y, #shadow-round-bl, " +
-    "#shadow-round-br, #shadow-round-tl, #shadow-round-tr, #outline-width-input").on("input", function() {
+        "#shadow-round-br, #shadow-round-tl, #shadow-round-tr, #outline-width-input").on("input", function () {
         redraw();
     });
 
@@ -350,7 +444,7 @@ $(document).ready(function () {
 
     $("#bg-color-enable").click(function () {
         if ($(this).is(":checked")) {
-            $(this).colorpicker({format: "hex", align:"left"}).on("changeColor", function (ev) {
+            $(this).colorpicker({format: "hex", align: "left"}).on("changeColor", function (ev) {
                 $("#shadow_image, #main-container").css("background", ev.color.toHex());
             }).colorpicker("show");
             $(this).colorpicker("reposition");
@@ -360,21 +454,17 @@ $(document).ready(function () {
         }
     });
 
-    $("#color-picker-shadow, #color-picker-fill, #color-picker-outline").colorpicker().on("changeColor", function(ev) {
+    $("#color-picker-shadow, #color-picker-fill, #color-picker-outline").colorpicker().on("changeColor", function (ev) {
         redraw();
     });
 
-    var enableTxt = "enable";
-    var disableTxt = "disable";
     //var input = "#color-picker-fill-input, #outline-width-input, #color-picker-outline-input";
     var input = "#fill-group, #outline-group";
     $("#fill-toggle").click(function () {
         var checked = $(this).is(":checked");
         if (checked) {
-            $(this).text(disableTxt);
             $(input).find('*').prop("disabled", false);
         } else {
-            $(this).text(enableTxt);
             $(input).find('*').prop("disabled", true);
         }
 
@@ -383,8 +473,8 @@ $(document).ready(function () {
     });
 
     $("#round-toggle").click(function () {
-        var advanced = "advanced";
-        var simple = "simple";
+        var advanced = "高级";
+        var simple = "简洁";
 
         if ($(this).text() == advanced) {
             $(this).text(simple);
@@ -421,6 +511,25 @@ $(document).ready(function () {
         redraw();
     });
 
+    $("#clip-left").click(function () {
+        clipSide.left = $(this).is(":checked");
+        redraw();
+    });
+    $("#clip-right").click(function () {
+        clipSide.right = $(this).is(":checked");
+        redraw();
+    });
+    $("#clip-top").click(function () {
+        clipSide.top = $(this).is(":checked");
+        redraw();
+    });
+    $("#clip-bottom").click(function () {
+        clipSide.bottom = $(this).is(":checked");
+        redraw();
+    });
+    $("#padding-top-line, #padding-bottom-line, #padding-left-line, #padding-right-line").on('input', function () {
+        redraw();
+    });
 
     //Resizing box
     $(this).mousemove(function f(e) {
@@ -456,8 +565,8 @@ $(document).ready(function () {
         if (isAnchor(e)) {
             boxResizeData = {
                 startPos: getMousePos(canvas, e),
-                startSizeCanvas:{width:canvas.width, height:canvas.height},
-                startSizeObject:{width:objectWidth, height:objectHeight}
+                startSizeCanvas: {width: canvas.width, height: canvas.height},
+                startSizeObject: {width: objectWidth, height: objectHeight}
             };
         }
     });
@@ -484,19 +593,19 @@ function sliderInit() {
     var sliderRight = $('#padding-right').slider(sliderOptions);
     var sliderBottom = $('#padding-bottom').slider(sliderOptions);
 
-    sliderBottom.on("slideStart", function() {
+    sliderBottom.on("slideStart", function () {
         sliderToogleTooltip(true, false);
-    }).on("slideStop", function() {
-        sliderToogleTooltip(true , true);
-    }).on("change", function() {
+    }).on("slideStop", function () {
+        sliderToogleTooltip(true, true);
+    }).on("change", function () {
         redraw(true);
     });
 
-    sliderRight.on("slideStart", function() {
+    sliderRight.on("slideStart", function () {
         sliderToogleTooltip(false, false);
-    }).on("slideStop", function() {
-        sliderToogleTooltip(false , true);
-    }).on("change", function() {
+    }).on("slideStop", function () {
+        sliderToogleTooltip(false, true);
+    }).on("change", function () {
         redraw(true);
     });
 }
@@ -548,7 +657,12 @@ function isAnchor(e) {
 }
 
 function boxSideCheck(mousePos, x1, x2, y1, y2) {
-    return pointRectangleIntersection({x: mousePos.x, y:mousePos.y}, {x1: x1-BOX_ANCHOR, x2: x2+BOX_ANCHOR, y1: y1-BOX_ANCHOR, y2: y2+BOX_ANCHOR})
+    return pointRectangleIntersection({x: mousePos.x, y: mousePos.y}, {
+        x1: x1 - BOX_ANCHOR,
+        x2: x2 + BOX_ANCHOR,
+        y1: y1 - BOX_ANCHOR,
+        y2: y2 + BOX_ANCHOR
+    })
 }
 
 function getMousePos(canvas, evt) {
